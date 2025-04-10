@@ -16,7 +16,7 @@ except ImportError as e:
 
 # --- Configuration ---
 # *** This is now the file to READ from AND WRITE to ***
-TARGET_JSON_FILE = 'amazon.com_scraped_data.json'
+TARGET_JSON_FILE = 'input_file.json'
 NUM_KEYWORDS_TO_EXTRACT = 100 # Adjust as needed
 
 # --- Main Processing Logic ---
