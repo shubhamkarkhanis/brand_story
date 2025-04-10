@@ -27,3 +27,5 @@ Thumbs.db
 
 # txt
 domains.txt
+
+*.Identifier
