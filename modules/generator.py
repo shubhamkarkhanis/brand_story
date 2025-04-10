@@ -2,7 +2,9 @@ import os
 import google.generativeai as genai
 from dotenv import load_dotenv
 import logging
-import json # Using json.dumps for potentially complex data in prompt
+import json # Used for loading input file AND formatting prompt data
+import argparse # For command-line arguments
+import sys # For exiting script on error
 
 # --- Configuration ---
 load_dotenv() # Load environment variables from .env file
@@ -16,138 +18,111 @@ if GOOGLE_API_KEY:
     try:
         genai.configure(api_key=GOOGLE_API_KEY)
         logging.info("Google Generative AI SDK configured successfully.")
-
-        # --- UNCOMMENTED: List available models ---
-        print("-" * 20)
-        print("Checking available models supporting 'generateContent'...")
-        try:
-            models_found = False
-            for m in genai.list_models():
-                # Check if 'generateContent' is a supported method for the model
-                if 'generateContent' in m.supported_generation_methods:
-                    # Print the full name of the model (e.g., 'models/gemini-1.0-pro')
-                    print(f"  - {m.name}")
-                    models_found = True
-            if not models_found:
-                 print("  No models found supporting 'generateContent'. Check API key permissions and enabled APIs in Google Cloud.")
-        except Exception as list_e:
-            print(f"  Error listing models: {list_e}")
-            print("  This could indicate an issue with the API key, permissions, or network.")
-        print("-" * 20)
-        # --- End of Model Listing Block ---
-
+        # Optional: Uncomment the model listing block if needed for debugging
+        # print("-" * 20); print("Checking available models..."); # etc.
     except Exception as e:
         logging.error(f"Failed to configure Google Generative AI SDK: {e}")
-        GOOGLE_API_KEY = None # Prevent further API calls if config fails
+        GOOGLE_API_KEY = None
 else:
     logging.warning("GOOGLE_API_KEY not found in environment variables. LLM generation will be skipped.")
 
-# --- Fallback Generator (Similar to before, kept for robustness) ---
-def _generate_report_template(analysis_results: dict) -> str:
+# --- MODIFIED: Fallback Story Generator ---
+def _generate_story_template(analysis_results: dict) -> str:
     """
-    Generates a simple brand report using an f-string template. Fallback option.
+    Generates a very simple brand story using an f-string template. Fallback option.
     """
-    logging.info("Using template-based report generator (fallback).")
+    logging.info("Using template-based story generator (fallback).")
     try:
         keywords = analysis_results.get('keywords', [])
         sentiment = analysis_results.get('sentiment', {})
-        sentiment_label = sentiment.get('label', 'Neutral').capitalize()
-        sentiment_score = sentiment.get('score', 0.0)
-        website_text_exists = bool(analysis_results.get('source_texts', {}).get('website'))
-        social_texts = {k: v for k, v in analysis_results.get('source_texts', {}).items() if k != 'website' and v}
-        social_platforms_found = list(social_texts.keys())
+        sentiment_label = sentiment.get('label', 'Neutral').lower()
 
-        # --- Build the template report ---
-        report = f"## Brand Analysis Report (Template)\n\n"
-        report += f"**Overall Sentiment:** {sentiment_label} (Score: {sentiment_score:.2f})\n\n" # Made score more visible
-
+        # --- Build the simple template story ---
+        story = f"This brand communicates with a generally {sentiment_label} tone. "
         if keywords:
-            top_keywords = ", ".join([f"`{k}`" for k in keywords[:7]]) # Use markdown for keywords
-            report += f"**Key Themes & Keywords:** The analysis identified several key themes, including: {top_keywords}.\n\n"
+            story += f"Key themes like '{keywords[0]}' and '{keywords[1] if len(keywords) > 1 else 'its core offerings'}' appear central to its online presence. "
         else:
-            report += "**Key Themes & Keywords:** Specific prominent keywords were not readily extracted from the provided text.\n\n"
-
-        report += "**Content Sources Analyzed:**\n"
-        if website_text_exists:
-            report += "- Primary Website Content\n"
-        if social_platforms_found:
-            # Ensure platform names are capitalized correctly if needed
-            platform_names = [p.capitalize() for p in social_platforms_found]
-            report += f"- Social Media Profiles: {', '.join(platform_names)}\n"
-        if not website_text_exists and not social_platforms_found:
-            report += "- No specific content sources could be confirmed.\n"
-
-        report += f"\n**Summary:** This brand's online presence appears to convey a generally **{sentiment_label.lower()}** message. "
-        if keywords:
-             report += f"The focus seems to be around '{keywords[0]}'."
-        report += "\n\n*[Note: This report was generated using a basic template due to limitations in accessing the advanced AI model.]*"
-        return report
+            story += "Its online presence focuses on its core offerings. "
+        story += "The overall impression is a brand focused on its primary area of expertise."
+        story += "\n\n*[Note: This brief story was generated using a basic template.]*"
+        return story
 
     except Exception as e:
-        logging.error(f"Error generating template report: {e}")
-        return "## Analysis Report\n\nAn error occurred during the automated report generation. Please review the raw analysis data."
+        logging.error(f"Error generating template story: {e}")
+        return "[Template generation error: Could not create basic story.]"
 
-# --- Gemini LLM Generator ---
-# MODIFICATION: Changed the default model_name to a potentially more current one.
-# *** IMPORTANT: Replace 'models/gemini-1.5-pro-latest' with the actual model name
-# *** found from the listing above if this one doesn't work!
-def _generate_report_gemini(analysis_results: dict, model_name: str = "models/gemini-1.5-pro-latest") -> str | None:
+# --- MODIFIED: Gemini Story Generator ---
+# Renamed function, updated docstring, replaced prompt
+def _generate_story_gemini(analysis_results: dict, model_name: str = "models/gemini-1.5-pro-latest") -> str | None:
     """
-    Attempts to generate a fancy, user-pleasing report using the Google Gemini API.
-    Returns the report string on success, None on failure.
+    Attempts to generate a concise brand story using the Google Gemini API based on the provided analysis.
+    Returns the story string on success, None on failure.
     """
     if not GOOGLE_API_KEY:
-        logging.warning("Google API key not available. Skipping Gemini report generation.")
+        logging.warning("Google API key not available. Skipping Gemini story generation.")
         return None
 
-    # Using the model_name passed
-    logging.info(f"Attempting to generate report using Gemini model ({model_name}).")
+    logging.info(f"Attempting to generate brand story using Gemini model ({model_name}).")
 
     try:
-        # Initialize the Gemini model using the specified name
-        # Ensure the model_name is one listed as available by genai.list_models()
         model = genai.GenerativeModel(model_name)
 
-        # --- Craft the Prompt (This is key!) ---
-        # Convert analysis results to a string format suitable for the prompt
-        # Using json.dumps can handle complex structures safely
+        # Convert analysis results to JSON string for the prompt
         analysis_summary = json.dumps(analysis_results, indent=2)
 
-        # Make sure the prompt is well-formed and doesn't contain unexpected characters
+        # --- NEW PROMPT ---
         prompt = f"""
-        **Objective:** Generate an engaging, insightful, and user-pleasing brand analysis report based on the provided data. The report should synthesize the findings into a coherent narrative, highlighting the brand's perceived online identity.
-
-        **Role:** You are a skilled marketing analyst and storyteller. Your tone should be professional, positive (where appropriate based on sentiment), and insightful. Use clear headings and bullet points where helpful for readability. Avoid overly technical jargon.
-
-        **Input Data (JSON format):**
+        Analysis Data:
         ```json
         {analysis_summary}
         ```
 
-        **Instructions:**
-        1.  **Introduction:** Start with a brief overview summarizing the analysis scope (e.g., website, social media).
-        2.  **Sentiment Analysis:** Clearly state the overall sentiment (Positive/Negative/Neutral) and its strength (score). Elaborate slightly on what this sentiment suggests about the brand's online communication style.
-        3.  **Key Themes & Keywords:** Discuss the prominent keywords. Don't just list them; explain what these themes suggest about the brand's focus, values, or industry positioning. Group related keywords if possible.
-        4.  **Brand Voice & Story:** Synthesize the sentiment and keywords into a short narrative (1-2 paragraphs) describing the *perceived* brand story or voice based *only* on the analyzed text. What impression does the brand seem to be making online?
-        5.  **Conclusion/Recommendations (Optional, keep brief):** Briefly conclude the report. You could add a sentence about potential strengths or areas for consistency based *only* on the analysis (e.g., "The consistent positive tone is a strength," or "Highlighting core themes more across platforms could be beneficial"). Do NOT invent recommendations outside the data.
-        6.  **Formatting:** Use Markdown for formatting (headings `##`, bold `**`, italics `*`, bullet points `-`). Ensure the output is well-structured and easy to read.
+       **Input Data Context:**
 
-        **Generate the Brand Analysis Report:**
+        **Input Data Context:**
+
+            Immediately preceding these instructions, you will find analysis data formatted as a JSON object. This JSON represents the findings from scraping and analyzing a company's online presence.
+
+            The core analysis results (from the NLP module) typically include:
+
+            * `keywords`: A list of important keywords or themes identified in the text (e.g., `["notion", "docs", "projects", ...]`).
+            * `sentiment`: An object containing the sentiment analysis:
+                * `label`: The overall sentiment label (e.g., `"Positive"`, `"Neutral"`).
+                * `score`: A numerical score associated with the sentiment (e.g., `0.9998`).
+
+            **Role:** You are an expert brand strategist and narrative copywriter specializing in distilling a company's essence into a compelling, flowing, and descriptive story.
+
+            **Goal:** Generate an **expansive and detailed** brand story, presented as a single block of narrative text. Use the analysis data (provided just before these instructions) to inform the story. The goal is to weave the analyzed data into a fluid, **verbose**, and evocative narrative, **not** to create a summary, report, or analysis of the data itself. Explore the nuances suggested by the data.
+
+            **Task:**
+
+            Based **only** on the analysis data provided immediately preceding this instruction set, write a compelling, **verbose**, and descriptive brand story for the company identified in that data. Focus on creating a rich narrative flow that captures the brand's identity, painting a vivid picture by synthesizing the `keywords`, `sentiment`, `website_text`, and any available `social_bios`. Develop the narrative arc suggested by the data.
+
+            **Requirements:**
+
+            1.  **Length:** Approximately **400-500 words**, ensuring an expansive, detailed, and verbose narrative within this length.
+            2.  **Tone:** The story's tone should reflect the `sentiment` found in the preceding analysis data.
+            3.  **Content:** Synthesize the key `keywords`/themes and reflect the core message found in the preceding analysis data (`website_text`, `social_bios` if available) into a cohesive, detailed, and evocative story.
+            4.  **Focus:** Capture the perceived essence and identity of the brand as presented online in the preceding data, telling its story vividly and in detail.
+            5.  **(Optional)** If inferred audience or brand archetype data is present in the preceding analysis, subtly weave it into the extended narrative.
+            6.  **Output Format:** Output **ONLY** the brand story itself as a single block of narrative text. **DO NOT** include any analysis, summaries, bullet points, keywords, introductory phrases (like "Here is the brand story:"), concluding remarks, or any text other than the story narrative itself. Ensure the output is pure, verbose narrative prose.
+
+            **Brand Story:**
+
         """
+        # --- END OF NEW PROMPT ---
 
-        # Generate the content
-        # Consider adding safety_settings if needed, see Gemini docs
-        # Example: safety_settings={'HARASSMENT': 'BLOCK_NONE'} # Use with caution
-        response = model.generate_content(prompt) # Add safety_settings=safety_settings if needed
+        response = model.generate_content(prompt)
 
-        # Enhanced response checking
         try:
-            # Accessing response.text might raise an exception if blocked
-            report = response.text
-            logging.info("Gemini report generation successful.")
-            return report
+            story = response.text
+            logging.info("Gemini story generation successful.")
+            # Simple check to remove potential unwanted preamble, although the prompt asks not to add it
+            lines = story.strip().split('\n')
+            if lines and lines[0].lower().startswith("here is the brand story"):
+                story = "\n".join(lines[1:]).strip()
+            return story
         except ValueError as ve:
-            # This often happens if the response was blocked
             logging.warning(f"Could not access response text, likely blocked. Error: {ve}")
             if response.prompt_feedback:
                  logging.warning(f"Prompt Feedback Block Reason: {response.prompt_feedback.block_reason}")
@@ -157,60 +132,67 @@ def _generate_report_gemini(analysis_results: dict, model_name: str = "models/ge
             logging.error(f"Error accessing response text: {text_e}")
             return None
 
-
     except Exception as e:
-        # Catching specific API errors can be helpful
-        # Example: from google.api_core import exceptions as api_exceptions
-        # if isinstance(e, api_exceptions.NotFound): ...
-        # if isinstance(e, api_exceptions.PermissionDenied): ...
-        logging.error(f"An error occurred during Gemini report generation: {e}")
-        # The error message `e` often contains the specific reason (like the 404)
+        logging.error(f"An error occurred during Gemini story generation: {e}")
         return None
 
-# --- Main Orchestrator Function ---
-def generate_brand_report(analysis_results: dict) -> str:
+# --- MODIFIED: Main Orchestrator Function ---
+# Renamed function
+def generate_brand_story(analysis_results: dict) -> str:
     """
-    Generates a brand report, trying the Gemini LLM first and falling back to a template.
-
-    Args:
-        analysis_results: A dictionary containing keywords, sentiment, and source_texts
-                          from Module 3. Example structure:
-                          {
-                              'keywords': ['innovation', 'data', 'cloud', ...],
-                              'sentiment': {'label': 'Positive', 'score': 0.85},
-                              'source_texts': {'website': '...', 'linkedin': '...'}
-                          }
-
-    Returns:
-        A string containing the generated brand report (Markdown formatted).
+    Generates a brand story, trying the Gemini LLM first and falling back to a template story.
     """
-    print("\n--- Generating Brand Report (Attempting Gemini) ---") # Moved print statement here
+    print("\n--- Generating Brand Story (Attempting Gemini) ---") # Updated print
 
-    # Try Gemini first
-    # It calls the modified _generate_report_gemini which now defaults to a newer model
-    gemini_report = _generate_report_gemini(analysis_results)
+    # Calls the Gemini *story* generator
+    gemini_story = _generate_story_gemini(analysis_results)
 
-    if gemini_report:
-        return gemini_report
+    if gemini_story:
+        return gemini_story
     else:
-        # If Gemini fails (key missing, API error, content blocked, wrong model etc.), use the fallback
-        logging.warning("Gemini generation failed or skipped, using template fallback.")
-        return _generate_report_template(analysis_results)
+        # If Gemini fails, use the fallback *story* template
+        logging.warning("Gemini story generation failed or skipped, using template fallback.")
+        return _generate_story_template(analysis_results) # Calls the story template
 
-# --- Example Usage ---
+# --- MODIFIED: Script Execution Block ---
 if __name__ == "__main__":
-    # Dummy data simulating output from Module 3
-    dummy_analysis = {
-        'keywords': ['sustainable finance', 'impact investing', 'ESG', 'reporting', 'green bonds', 'climate action', 'transparency'],
-        'sentiment': {'label': 'Positive', 'score': 0.88},
-        'source_texts': {
-            'website': 'Our firm leads in sustainable finance, offering bespoke ESG solutions and impact investing opportunities focused on measurable outcomes and client transparency...',
-            'linkedin': 'Driving change through sustainable finance and ESG integration. Proud to support the transition to a greener economy. #impactinvesting #esg #sustainability',
-            'twitter': None # Example where a social fetch failed
-            }
-    }
+    # --- Setup Argument Parser ---
+    # Fixed the description string
+    parser = argparse.ArgumentParser(description="Generate a brand story from NLP analysis results stored in a JSON file.")
+    parser.add_argument(
+        "input_file", # Name of the argument (positional)
+        type=str,     # Expected type is string (file path)
+        help="Path to the JSON file containing the NLP analysis results." # Help message
+    )
+    args = parser.parse_args() # Parse the command-line arguments
 
-    # The call to generate_brand_report now handles the initial print message
-    final_report = generate_brand_report(dummy_analysis)
-    print("\n--- Final Brand Report ---")
-    print(final_report)
+    # --- Load data from the specified JSON file ---
+    analysis_data = None # Initialize variable
+    try:
+        with open(args.input_file, 'r', encoding='utf-8') as f:
+            analysis_data = json.load(f)
+        logging.info(f"Successfully loaded analysis data from: {args.input_file}")
+    except FileNotFoundError:
+        logging.error(f"Error: Input file not found at '{args.input_file}'")
+        print(f"Error: Input file not found at '{args.input_file}'", file=sys.stderr)
+        sys.exit(1)
+    except json.JSONDecodeError:
+        logging.error(f"Error: Could not decode JSON from '{args.input_file}'.")
+        print(f"Error: Could not decode JSON from '{args.input_file}'.", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        logging.error(f"An unexpected error occurred while reading '{args.input_file}': {e}")
+        print(f"An unexpected error occurred while reading '{args.input_file}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # --- Proceed only if data was loaded successfully ---
+    if analysis_data:
+        # Pass the loaded data to the STORY generator
+        final_story = generate_brand_story(analysis_data) # Renamed variable
+
+        print("\n--- Final Brand Story ---") # Updated print
+        print(final_story) # Renamed variable
+    else:
+        logging.error("Analysis data could not be loaded. Exiting.")
+        print("Error: Analysis data could not be loaded.", file=sys.stderr)
+        sys.exit(1)
