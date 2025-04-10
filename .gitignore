@@ -25,5 +25,7 @@ Thumbs.db
 # JSON
 *.json
 
+# txt
+domains.txt
 
 *.Identifier
