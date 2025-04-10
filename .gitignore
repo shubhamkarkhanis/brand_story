@@ -1,0 +1,23 @@
+# .gitignore contents
+
+# Virtual environment
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE / Editor specific
+.vscode/
+.idea/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Secrets - IMPORTANT!
+.env
+*.env
+
+# Streamlit specific (if needed later)
+.streamlit/
