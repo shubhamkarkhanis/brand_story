@@ -21,3 +21,9 @@ Thumbs.db
 
 # Streamlit specific (if needed later)
 .streamlit/
+
+# JSON
+*.json
+
+
+*.Identifier
