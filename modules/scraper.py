@@ -512,7 +512,7 @@ if __name__ == '__main__':
         try:
             domain_name = urlparse(test_company_url).netloc.replace('www.', '')
             # Sanitize domain name for filename (replace dots, etc.)
-            safe_filename = re.sub(r'[^\w\-.]', '_', domain_name) + "_scraped_data.json"
+            safe_filename = "input_file.json"
             output_filepath = os.path.join(".", safe_filename) # Save in current directory
 
             with open(output_filepath, 'w', encoding='utf-8') as f:
