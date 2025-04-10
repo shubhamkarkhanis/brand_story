@@ -85,6 +85,8 @@ def _generate_story_gemini(analysis_results: dict, model_name: str = "models/gem
 
             The core analysis results (from the NLP module) typically include:
 
+            * `source_url`: Web handle of the brand/ company(e.g.,`https://amazon.in`)
+            * `social_links`: Social media handles of brands/ companies(e.g., `["Facebook": "https://www.facebook.com/Amazon", "Twitter": "https://twitter.com/amazonnews", "LinkedIn":"https://www.linkedin.com/company/1586"]`)
             * `keywords`: A list of important keywords or themes identified in the text (e.g., `["notion", "docs", "projects", ...]`).
             * `sentiment`: An object containing the sentiment analysis:
                 * `label`: The overall sentiment label (e.g., `"Positive"`, `"Neutral"`).
