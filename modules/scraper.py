@@ -5,8 +5,10 @@ import requests # For making HTTP requests
 from bs4 import BeautifulSoup # For parsing HTML content
 import re # For regular expressions (finding patterns in links and text)
 from urllib.parse import urljoin, urlparse # For handling relative URLs
-import json # ***** Added for JSON output *****
-import os # ***** Added to help with filename generation *****
+import json # For JSON output
+import os # To help with filename generation and path joining
+import subprocess # ***** Added to run other scripts *****
+import sys # ***** Added to get python executable path *****
 
 # --- Constants ---
 
@@ -454,17 +456,18 @@ def get_social_bios(social_links_dict: dict) -> dict:
 
 if __name__ == '__main__':
     # This block runs only when the script is executed directly (e.g., python modules/scraper.py)
-    # It's used for testing the functions in this file.
+    # It's used for testing the functions in this file AND triggering the next step.
 
     # Ensure libraries are installed: pip install requests beautifulsoup4
     # You might need: pip install lxml (optional, potentially faster parser)
 
     print("="*50)
-    print(" SCRAPER MODULE TESTER")
+    print(" SCRAPER MODULE TESTER & TRIGGER")
     print("="*50)
 
     # --- Get URL from User Input ---
     test_company_url = input("Enter the company website URL to test (e.g., https://www.example.com): ").strip()
+    output_filename = "input_file.json" # Fixed filename as requested
 
     if not test_company_url:
         print("No URL entered. Exiting test.")
@@ -477,56 +480,114 @@ if __name__ == '__main__':
             "website_text": None,
             "social_bios": {}
         }
+        scrape_successful = True # Assume success initially
 
         # 1. Test finding social links
         print("\n--- Testing find_social_links ---")
-        found_socials = find_social_links(test_company_url)
-        scraped_data["social_links"] = found_socials # Store results
+        try:
+            found_socials = find_social_links(test_company_url)
+            scraped_data["social_links"] = found_socials # Store results
+        except Exception as e:
+            print(f"[!] Error during find_social_links: {e}")
+            scrape_successful = False
+            scraped_data["social_links"] = {"error": str(e)}
         print("-" * 30)
 
         # 2. Test getting website text
         print("\n--- Testing get_website_text ---")
-        # Use the URL provided by the user directly here as well
-        website_text = get_website_text(test_company_url)
-        scraped_data["website_text"] = website_text # Store results
-        if website_text:
-            print(f"\nExtracted Website Text Sample (first 500 chars):\n{website_text[:500]}...")
-        else:
-            print("\nFailed to extract website text.")
+        try:
+            # Use the URL provided by the user directly here as well
+            website_text = get_website_text(test_company_url)
+            scraped_data["website_text"] = website_text # Store results
+            if website_text:
+                print(f"\nExtracted Website Text Sample (first 500 chars):\n{website_text[:500]}...")
+            else:
+                print("\nFailed to extract website text.")
+                # Decide if this constitutes a failure preventing analysis
+                # scrape_successful = False # Optional: uncomment if website text is mandatory
+        except Exception as e:
+            print(f"[!] Error during get_website_text: {e}")
+            scrape_successful = False
+            scraped_data["website_text"] = f"Error: {e}"
         print("-" * 30)
 
         # 3. Test getting social bios (only if links were found)
         print("\n--- Testing get_social_bios ---")
-        if found_socials:
-            extracted_bios = get_social_bios(found_socials)
-            scraped_data["social_bios"] = extracted_bios # Store results
-            if not extracted_bios:
-                print("\nNo social bios were successfully extracted with current selectors (as expected for many sites).")
+        if scraped_data["social_links"] and isinstance(scraped_data["social_links"], dict) and "error" not in scraped_data["social_links"]:
+            try:
+                extracted_bios = get_social_bios(scraped_data["social_links"])
+                scraped_data["social_bios"] = extracted_bios # Store results
+                if not extracted_bios:
+                    print("\nNo social bios were successfully extracted with current selectors (as expected for many sites).")
+            except Exception as e:
+                 print(f"[!] Error during get_social_bios: {e}")
+                 # Don't mark as failure, bio scraping is optional/experimental
+                 scraped_data["social_bios"] = {"error": str(e)}
+        elif isinstance(scraped_data["social_links"], dict) and "error" in scraped_data["social_links"]:
+            print("\nSkipping social bio test due to previous error finding links.")
         else:
             print("\nSkipping social bio test as no social links were found initially.")
         print("-" * 30)
 
         # --- ***** SAVE RESULTS TO JSON FILE ***** ---
         print("\n--- Saving Scraped Data ---")
-        # Create a filename based on the domain name
+        output_filepath = os.path.join(".", output_filename) # Save in current directory (project root)
+        saved_successfully = False
         try:
-            domain_name = urlparse(test_company_url).netloc.replace('www.', '')
-            # Sanitize domain name for filename (replace dots, etc.)
-            safe_filename = re.sub(r'[^\w\-.]', '_', domain_name) + "_scraped_data.json"
-            output_filepath = os.path.join(".", safe_filename) # Save in current directory
-
             with open(output_filepath, 'w', encoding='utf-8') as f:
                 json.dump(scraped_data, f, ensure_ascii=False, indent=4) # Use indent for readability
             print(f"[✓] Scraped data successfully saved to: {output_filepath}")
+            saved_successfully = True
 
         except Exception as e:
-            print(f"[!] Error saving data to JSON file: {e}")
-            # Optionally print the data to console as a fallback
-            # print("\nScraped Data (JSON fallback):")
-            # print(json.dumps(scraped_data, indent=4))
+            print(f"[!] Error saving data to JSON file '{output_filepath}': {e}")
+            scrape_successful = False # Mark as failure if we can't save the input file
 
         print("-" * 30)
 
+        # --- ***** CALL run_analysis.py ***** ---
+        # Only proceed if scraping and saving were generally successful
+        if scrape_successful and saved_successfully:
+            print("\n--- Triggering Analysis Script ---")
+            analysis_script_path = os.path.join("modules", "run_analysis.py")
+            # Use sys.executable to ensure the same python interpreter is used
+            command = [sys.executable, analysis_script_path]
+            print(f"Running command: {' '.join(command)}")
+
+            try:
+                # Run the script, wait for it to complete
+                # Capture output to see results/errors from the analysis script
+                result = subprocess.run(command, check=True, capture_output=True, text=True, encoding='utf-8')
+                print(f"[✓] {analysis_script_path} executed successfully.")
+                if result.stdout:
+                    print("\n--- Analysis Script Output ---")
+                    print(result.stdout)
+                    print("----------------------------")
+                if result.stderr: # Should be empty if check=True didn't raise error, but check anyway
+                    print("\n--- Analysis Script Error Output ---")
+                    print(result.stderr)
+                    print("------------------------------")
+
+            except FileNotFoundError:
+                print(f"[!] Error: Analysis script not found at '{analysis_script_path}'")
+            except subprocess.CalledProcessError as e:
+                # This catches errors if the script returns a non-zero exit code
+                print(f"[!] Error: {analysis_script_path} failed with exit code {e.returncode}.")
+                if e.stdout:
+                    print("\n--- Analysis Script Output (on error) ---")
+                    print(e.stdout)
+                    print("---------------------------------------")
+                if e.stderr:
+                    print("\n--- Analysis Script Error Output (on error) ---")
+                    print(e.stderr)
+                    print("-------------------------------------------")
+            except Exception as e:
+                print(f"[!] An unexpected error occurred while running {analysis_script_path}: {e}")
+        elif not saved_successfully:
+             print("\n--- Skipping Analysis: Failed to save input_file.json ---")
+        else:
+             print("\n--- Skipping Analysis: Scraping process encountered critical errors ---")
+
         print("\n" + "="*50)
-        print(" SCRAPER MODULE TEST COMPLETE")
+        print(" SCRAPER MODULE TEST & TRIGGER COMPLETE")
         print("="*50)
