@@ -127,7 +127,7 @@ if 'pdf_error' not in st.session_state: st.session_state.pdf_error = None
 TONE_OPTIONS = ["Default", "Formal", "Casual", "Enthusiastic", "Witty", "Professional", "Concise", "Inspirational"]
 
 with main_content_col:
-    st.markdown("<h1 style='text-align: center; color: white;'>🚀 AI Brand Story Generator</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: white;'>🚀Essence Engine</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: #e0e0e0;'>Enter a website URL, select a tone, and generate a brand story.</p>", unsafe_allow_html=True)
     st.write("")
 
