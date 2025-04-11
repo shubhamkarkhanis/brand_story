@@ -534,6 +534,11 @@ if __name__ == '__main__':
         output_filepath = os.path.join(".", output_filename) # Save in current directory (project root)
         saved_successfully = False
         try:
+            domain_name = urlparse(test_company_url).netloc.replace('www.', '')
+            # Sanitize domain name for filename (replace dots, etc.)
+            safe_filename = "input_file.json"
+            output_filepath = os.path.join(".", safe_filename) # Save in current directory
+
             with open(output_filepath, 'w', encoding='utf-8') as f:
                 json.dump(scraped_data, f, ensure_ascii=False, indent=4) # Use indent for readability
             print(f"[✓] Scraped data successfully saved to: {output_filepath}")
