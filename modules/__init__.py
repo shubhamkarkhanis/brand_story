@@ -1,163 +1,163 @@
 # modules/__init__.py
+# Orchestrates the scraping, analysis, and generation pipeline via direct function calls.
+# *** Includes fix for TypeError in analyze_content call ***
 
 import json
 import os
-import subprocess
-import sys
 import traceback
 from urllib.parse import urlparse
 import re # Needed for filename sanitization
+import logging # Use logging for better status messages
 
-# --- Import functions from sibling modules using relative imports ---
+# --- Import functions from sibling modules ---
 try:
+    # *** Make sure get_social_bios is imported if you intend to use it ***
     from .scraper import find_social_links, get_website_text, get_social_bios
-    print("✅ Scraper functions imported successfully.")
+    logging.info("✅ Scraper functions imported successfully.")
 except ImportError as e:
-    print(f"❌ Error importing from .scraper: {e}")
-    print("Ensure scraper.py is in the 'modules' directory.")
-    # Decide if you want to exit or handle this differently
-    # exit()
+    logging.error(f"❌ Error importing from .scraper: {e}")
+    raise # Re-raise error to stop Streamlit app if core components missing
+
+try:
+    # *** ASSUMPTION: You have an analyzer.py with analyze_content function ***
+    # This function definition likely looks like: def analyze_content(website_text, social_bios_dict):
+    from .analyzer import analyze_content
+    logging.info("✅ Analyzer function imported successfully.")
+except ImportError as e:
+    logging.warning(f"⚠️ Warning: Could not import from .analyzer: {e}")
+    logging.warning("Analysis step will be skipped.")
+    # Define a dummy function if analyzer is missing, so pipeline doesn't crash
+    def analyze_content(website_text, social_bios_dict): # Match expected signature
+        logging.warning("Using dummy analyze_content function.")
+        return {"keywords": ["N/A"], "sentiment": {"label": "Unavailable", "score": 0.0}, "error": "Analyzer module not found"}
+
+try:
+    from .generator import generate_brand_story # Imports the main function from generator.py
+    logging.info("✅ Generator function imported successfully.")
+except ImportError as e:
+    logging.error(f"❌ Error importing from .generator: {e}")
+    raise # Re-raise error
 
 # --- Configuration ---
-OUTPUT_FILENAME = "input_file.json" # Fixed intermediate filename
+# No longer need fixed intermediate filename for this flow
 
-# --- Helper to create safe filename (if needed, though fixed name is used here) ---
-def create_safe_filename_from_url(url: str) -> str:
-    """Generates a safe filename from a URL, typically based on the domain."""
-    try:
-        domain_name = urlparse(url).netloc.replace('www.', '')
-        safe_name = re.sub(r'[^\w\-]+', '_', domain_name)
-        return f"{safe_name}.json" if safe_name else "unknown_domain.json"
-    except Exception:
-        return f"scraped_url_{hash(url)}.json"
-
-# --- Main Pipeline Function ---
-def run_full_pipeline(target_url: str):
+# --- Main Pipeline Function (Refactored) ---
+def run_full_pipeline(target_url: str) -> dict:
     """
-    Runs the full scrape -> analyze -> generate pipeline for a given URL.
+    Runs the full scrape -> analyze -> generate pipeline for a given URL
+    using direct function calls and returns results in a dictionary.
 
     Args:
         target_url: The company website URL to process.
+
+    Returns:
+        A dictionary containing results.
     """
     print("="*50)
     print(f"🚀 Starting Full Pipeline for: {target_url}")
     print("="*50)
 
-    # --- Step 1: Scraping ---
-    print("\n--- Phase 1: Scraping ---")
-    scraped_data = {
+    pipeline_results = {
+        "success": False, # Overall success flag
+        "message": "Pipeline started.",
         "source_url": target_url,
         "social_links": {},
         "website_text": None,
-        "social_bios": {}
+        "analysis": None,
+        "story": None
+        # You might want to add social_bios to the results dict too
+        # "social_bios": {}
     }
-    scrape_successful = True # Assume success initially
+    social_bios = {} # Initialize social_bios dict here
 
+    # --- Step 1: Scraping ---
+    print("\n--- Phase 1: Scraping ---")
     try:
         print("  Running find_social_links...")
-        scraped_data["social_links"] = find_social_links(target_url)
+        pipeline_results["social_links"] = find_social_links(target_url) or {} # Ensure dict
         print("  Running get_website_text...")
-        scraped_data["website_text"] = get_website_text(target_url)
-        if scraped_data["social_links"] and isinstance(scraped_data["social_links"], dict):
+        pipeline_results["website_text"] = get_website_text(target_url) # Returns text or None
+
+        # *** Ensure get_social_bios is called if links exist ***
+        if pipeline_results["social_links"]:
              print("  Running get_social_bios...")
-             scraped_data["social_bios"] = get_social_bios(scraped_data["social_links"])
+             social_bios = get_social_bios(pipeline_results["social_links"]) # Assign to local variable
+             # pipeline_results["social_bios"] = social_bios # Optionally store in main results
         else:
              print("  Skipping get_social_bios (no links found).")
+        # *** End change ***
+
+        if pipeline_results["website_text"] is None and not pipeline_results["social_links"]:
+             raise ValueError("Failed to retrieve website text and social links.")
+
         print("✅ Scraping phase complete.")
+        pipeline_results["message"] = "Scraping complete."
+
     except Exception as e:
         print(f"❌ Error during scraping phase: {e}")
         traceback.print_exc()
-        scrape_successful = False
+        pipeline_results["message"] = f"Scraping failed: {e}"
+        return pipeline_results # Exit early if scraping fails critically
 
-    # --- Step 2: Save Scraped Data ---
-    print("\n--- Phase 2: Saving Scraped Data ---")
-    output_filepath = os.path.abspath(OUTPUT_FILENAME) # Use absolute path from CWD
-    saved_successfully = False
-    if scrape_successful:
+    # --- Step 2: Analysis ---
+    # Only proceed if we have some text to analyze
+    if pipeline_results["website_text"]:
+        print("\n--- Phase 2: Analyzing Content ---")
         try:
-            with open(output_filepath, 'w', encoding='utf-8') as f:
-                json.dump(scraped_data, f, ensure_ascii=False, indent=4)
-            print(f"✅ Scraped data successfully saved to: {output_filepath}")
-            saved_successfully = True
-        except Exception as e:
-            print(f"❌ Error saving scraped data to '{output_filepath}': {e}")
-            traceback.print_exc()
-    else:
-        print("🟡 Skipping save due to scraping errors.")
+            # *** Modify the call to analyze_content ***
+            # Pass website_text and social_bios as separate arguments
+            pipeline_results["analysis"] = analyze_content(
+                pipeline_results["website_text"], # First argument
+                social_bios                     # Second argument (using the variable populated above)
+            )
+            # *** End modification ***
 
-    # --- Step 3: Run Analysis Script ---
-    analysis_ok = False
-    if saved_successfully: # Only run analysis if scraping and saving worked
-        print("\n--- Phase 3: Triggering Analysis Script ---")
-        # Assuming run_analysis.py is in the 'modules' subdirectory
-        analysis_script_path = os.path.join("modules", "run_analysis.py")
-        analysis_command = [sys.executable, analysis_script_path]
-        print(f"  Running command: {' '.join(analysis_command)}")
-        try:
-            # Run analysis, wait for completion, check for errors
-            analysis_result = subprocess.run(analysis_command, check=True, capture_output=True, text=True, encoding='utf-8', cwd='.') # Run from project root
-            print(f"✅ {analysis_script_path} executed successfully.")
-            analysis_ok = True
-            if analysis_result.stdout:
-                print("  --- Analysis Script Output ---")
-                print(analysis_result.stdout.strip())
-                print("  ----------------------------")
-        except FileNotFoundError:
-            print(f"❌ Error: Analysis script not found at '{analysis_script_path}' (relative to project root).")
-        except subprocess.CalledProcessError as e:
-            print(f"❌ Error: {analysis_script_path} failed with exit code {e.returncode}.")
-            if e.stdout: print(f"     Output:\n{e.stdout.strip()}")
-            if e.stderr: print(f"     Error Output:\n{e.stderr.strip()}")
+            print("✅ Analysis phase complete.")
+            pipeline_results["message"] = "Analysis complete."
         except Exception as e:
-            print(f"❌ An unexpected error occurred while running {analysis_script_path}: {e}")
+            print(f"❌ Error during analysis phase: {e}")
             traceback.print_exc()
+            pipeline_results["message"] = f"Analysis failed: {e}"
+            # Set analysis to None or an error dict if needed downstream
+            pipeline_results["analysis"] = {"error": f"Analysis failed: {e}"}
     else:
-        print("🟡 Skipping analysis due to previous errors.")
+        print("🟡 Skipping analysis phase (no website text found).")
+        pipeline_results["message"] = "Scraping yielded no text for analysis."
 
-    # --- Step 4: Run Generator Script ---
-    generator_ok = False
-    if analysis_ok: # Only run generator if analysis was successful
-        print("\n--- Phase 4: Triggering Generator Script ---")
-        # Assuming generator.py is in the 'modules' subdirectory
-        generator_script_path = os.path.join("modules", "generator.py")
-        # Pass the fixed filename as a command-line argument
-        generator_command = [sys.executable, generator_script_path, OUTPUT_FILENAME]
-        print(f"  Running command: {' '.join(generator_command)}")
-        try:
-            # Run generator, wait for completion, check for errors
-            generator_result = subprocess.run(generator_command, check=True, capture_output=True, text=True, encoding='utf-8', cwd='.') # Run from project root
-            print(f"✅ {generator_script_path} executed successfully.")
-            generator_ok = True
-            if generator_result.stdout:
-                print("  --- Generator Script Output ---")
-                print(generator_result.stdout.strip())
-                print("  -----------------------------")
-        except FileNotFoundError:
-            print(f"❌ Error: Generator script not found at '{generator_script_path}' (relative to project root).")
-        except subprocess.CalledProcessError as e:
-            print(f"❌ Error: {generator_script_path} failed with exit code {e.returncode}.")
-            if e.stdout: print(f"     Output:\n{e.stdout.strip()}")
-            if e.stderr: print(f"     Error Output:\n{e.stderr.strip()}")
-        except Exception as e:
-            print(f"❌ An unexpected error occurred while running {generator_script_path}: {e}")
-            traceback.print_exc()
+
+    # --- Step 3: Generation ---
+    print("\n--- Phase 3: Generating Story ---")
+    # Check if analysis results exist AND don't contain an error key we might have added
+    if pipeline_results["analysis"] is not None and not pipeline_results["analysis"].get("error"):
+         try:
+             pipeline_results["story"] = generate_brand_story(pipeline_results["analysis"])
+             if pipeline_results["story"]:
+                 print("✅ Generation phase complete.")
+                 pipeline_results["message"] = "Story generated successfully."
+                 pipeline_results["success"] = True # Mark overall success
+             else:
+                  print("⚠️ Generation phase completed, but no story was returned (check logs/API keys).")
+                  pipeline_results["message"] = "Generation failed to produce a story."
+
+         except Exception as e:
+             print(f"❌ Error during generation phase: {e}")
+             traceback.print_exc()
+             pipeline_results["message"] = f"Story generation failed: {e}"
     else:
-         print("\n🟡 Skipping Generation: Analysis script did not complete successfully.")
+        # Handle cases where analysis was skipped or failed
+        if pipeline_results["analysis"] and pipeline_results["analysis"].get("error"):
+             print("🟡 Skipping generation phase (Analysis step failed).")
+             # Keep the analysis error message
+             pipeline_results["message"] = pipeline_results["analysis"].get("error", "Analysis failed, cannot generate story.")
+        else: # Analysis was skipped due to no text
+             print("🟡 Skipping generation phase (no analysis results available).")
+             pipeline_results["message"] = "Analysis results missing, cannot generate story."
+
 
     # --- Pipeline End ---
     print("\n" + "="*50)
-    if generator_ok:
-        print("✅ Full Pipeline Completed Successfully!")
-    elif analysis_ok:
-        print("⚠️ Pipeline Completed Analysis, but Generator Failed.")
-    elif saved_successfully:
-         print("❌ Pipeline Failed during Analysis.")
-    else:
-         print("❌ Pipeline Failed during Scraping or Saving.")
+    print(f"🏁 Pipeline Finished: Success={pipeline_results['success']}, Message='{pipeline_results['message']}'")
     print("="*50)
 
-# Example of how to call this from another script (e.g., app.py or a main runner script)
-# if __name__ == '__main__':
-#     test_url = "https://streamlit.io/"
-#     run_full_pipeline(test_url)
+    return pipeline_results
 

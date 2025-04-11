@@ -1,200 +1,156 @@
+# modules/generator.py
+# (Keep other imports and functions as they were)
 import os
 import google.generativeai as genai
 from dotenv import load_dotenv
 import logging
-import json # Used for loading input file AND formatting prompt data
-import argparse # For command-line arguments
-import sys # For exiting script on error
+import json
+import argparse
+import sys
 
 # --- Configuration ---
-load_dotenv() # Load environment variables from .env file
+load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-
-# Setup basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Configure the Gemini client library
-if GOOGLE_API_KEY:
-    try:
-        genai.configure(api_key=GOOGLE_API_KEY)
-        logging.info("Google Generative AI SDK configured successfully.")
-        # Optional: Uncomment the model listing block if needed for debugging
-        # print("-" * 20); print("Checking available models..."); # etc.
-    except Exception as e:
-        logging.error(f"Failed to configure Google Generative AI SDK: {e}")
-        GOOGLE_API_KEY = None
-else:
-    logging.warning("GOOGLE_API_KEY not found in environment variables. LLM generation will be skipped.")
+# --- Functions (_generate_story_template, configure_gemini remain the same) ---
+def configure_gemini():
+    # ...(keep existing implementation)...
+    if GOOGLE_API_KEY:
+        try:
+            genai.configure(api_key=GOOGLE_API_KEY)
+            logging.info("Google Generative AI SDK configured successfully.")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to configure Google Generative AI SDK: {e}")
+            return False
+    else:
+        logging.warning("GOOGLE_API_KEY not found in environment variables. LLM generation will be skipped.")
+        return False
 
-# --- MODIFIED: Fallback Story Generator ---
 def _generate_story_template(analysis_results: dict) -> str:
-    """
-    Generates a very simple brand story using an f-string template. Fallback option.
-    """
+    # ...(keep existing implementation)...
     logging.info("Using template-based story generator (fallback).")
     try:
+        analysis_results = analysis_results or {}
         keywords = analysis_results.get('keywords', [])
         sentiment = analysis_results.get('sentiment', {})
         sentiment_label = sentiment.get('label', 'Neutral').lower()
-
-        # --- Build the simple template story ---
         story = f"This brand communicates with a generally {sentiment_label} tone. "
-        if keywords:
-            story += f"Key themes like '{keywords[0]}' and '{keywords[1] if len(keywords) > 1 else 'its core offerings'}' appear central to its online presence. "
-        else:
-            story += "Its online presence focuses on its core offerings. "
+        if keywords and len(keywords) > 0:
+            kw_snippet = f"'{keywords[0]}'"
+            if len(keywords) > 1: kw_snippet += f" and '{keywords[1]}'"
+            story += f"Key themes like {kw_snippet} appear central to its online presence. "
+        else: story += "Its online presence focuses on its core offerings. "
         story += "The overall impression is a brand focused on its primary area of expertise."
         story += "\n\n*[Note: This brief story was generated using a basic template.]*"
         return story
-
     except Exception as e:
         logging.error(f"Error generating template story: {e}")
         return "[Template generation error: Could not create basic story.]"
 
+
 # --- MODIFIED: Gemini Story Generator ---
-# Renamed function, updated docstring, replaced prompt
 def _generate_story_gemini(analysis_results: dict, model_name: str = "models/gemini-1.5-pro-latest") -> str | None:
     """
-    Attempts to generate a concise brand story using the Google Gemini API based on the provided analysis.
-    Returns the story string on success, None on failure.
+    Attempts to generate a structured brand story using the Google Gemini API.
+    Returns the story string (Markdown formatted) on success, None on failure.
     """
-    if not GOOGLE_API_KEY:
-        logging.warning("Google API key not available. Skipping Gemini story generation.")
+    if not configure_gemini():
         return None
 
-    logging.info(f"Attempting to generate brand story using Gemini model ({model_name}).")
+    logging.info(f"Attempting to generate structured brand story using Gemini model ({model_name}).")
 
     try:
         model = genai.GenerativeModel(model_name)
+        # Ensure analysis_results is a dict before dumping
+        analysis_summary = json.dumps(analysis_results or {}, indent=2)
 
-        # Convert analysis results to JSON string for the prompt
-        analysis_summary = json.dumps(analysis_results, indent=2)
-
-        # --- NEW PROMPT ---
+        # --- *** MODIFIED PROMPT *** ---
+        # Changed requirements to ask for Markdown headings and paragraphs
         prompt = f"""
         Analysis Data:
         ```json
         {analysis_summary}
         ```
 
-       **Input Data Context:**
-
         **Input Data Context:**
+        The JSON above contains analysis from scraping a company's website and potentially social media. It includes identified `keywords`, overall `sentiment` (label and score), and potentially the source `website_text` and `social_bios`.
 
-            Immediately preceding these instructions, you will find analysis data formatted as a JSON object. This JSON represents the findings from scraping and analyzing a company's online presence.
+        **Role:** You are an expert brand strategist and narrative copywriter.
 
-            The core analysis results (from the NLP module) typically include:
+        **Goal:** Generate a compelling and informative brand story based *only* on the provided Analysis Data. The story should be well-structured, using clear headings and paragraphs to present different facets of the brand's identity as revealed by the data.
 
-            * `source_url`: Web handle of the brand/ company(e.g.,`https://amazon.in`)
-            * `social_links`: Social media handles of brands/ companies(e.g., `["Facebook": "https://www.facebook.com/Amazon", "Twitter": "https://twitter.com/amazonnews", "LinkedIn":"https://www.linkedin.com/company/1586"]`)
-            * `keywords`: A list of important keywords or themes identified in the text (e.g., `["notion", "docs", "projects", ...]`).
-            * `sentiment`: An object containing the sentiment analysis:
-                * `label`: The overall sentiment label (e.g., `"Positive"`, `"Neutral"`).
-                * `score`: A numerical score associated with the sentiment (e.g., `0.9998`).
+        **Task:**
+        Write a brand story using Markdown formatting. Structure the story logically with appropriate headings and well-written paragraphs underneath each. Synthesize the `keywords`, `sentiment`, `website_text`, and any available `social_bios` from the Analysis Data.
 
-            **Role:** You are an expert brand strategist and narrative copywriter specializing in distilling a company's essence into a compelling, flowing, and descriptive story.
+        **Requirements:**
 
-            **Goal:** Generate an **expansive and detailed** brand story, presented as a single block of narrative text. Use the analysis data (provided just before these instructions) to inform the story. The goal is to weave the analyzed data into a fluid, **verbose**, and evocative narrative, **not** to create a summary, report, or analysis of the data itself. Explore the nuances suggested by the data.
+        1.  **Structure:** Organize the story using Markdown headings (e.g., `## Brand Identity`, `## Core Themes`, `## Online Voice & Tone`, `## Overall Narrative`). Use at least 3-4 relevant headings.
+        2.  **Content:** Under each heading, write 1-3 detailed paragraphs synthesizing the relevant information from the Analysis Data. Weave in keywords naturally. Reflect the detected sentiment in the language used.
+        3.  **Formatting:** Use standard Markdown for headings (`## Heading Title`) and paragraphs (standard text separated by blank lines). Ensure proper paragraph breaks.
+        4.  **Focus:** Base the story *exclusively* on the provided Analysis Data. Do not add external information or make assumptions beyond the data.
+        5.  **Output Format:** Output **ONLY** the Markdown formatted brand story. **DO NOT** include the original JSON data, introductory phrases (like "Here is the story:"), concluding remarks, or any text other than the structured Markdown story itself.
 
-            **Task:**
-
-            Based **only** on the analysis data provided immediately preceding this instruction set, write a compelling, **verbose**, and descriptive brand story for the company identified in that data. Focus on creating a rich narrative flow that captures the brand's identity, painting a vivid picture by synthesizing the `keywords`, `sentiment`, `website_text`, and any available `social_bios`. Develop the narrative arc suggested by the data.
-
-            **Requirements:**
-
-            1.  **Length:** Approximately **400-500 words**, ensuring an expansive, detailed, and verbose narrative within this length.
-            2.  **Tone:** The story's tone should reflect the `sentiment` found in the preceding analysis data.
-            3.  **Content:** Synthesize the key `keywords`/themes and reflect the core message found in the preceding analysis data (`website_text`, `social_bios` if available) into a cohesive, detailed, and evocative story.
-            4.  **Focus:** Capture the perceived essence and identity of the brand as presented online in the preceding data, telling its story vividly and in detail.
-            5.  **(Optional)** If inferred audience or brand archetype data is present in the preceding analysis, subtly weave it into the extended narrative.
-            6.  **Output Format:** Output **ONLY** the brand story itself as a single block of narrative text. **DO NOT** include any analysis, summaries, bullet points, keywords, introductory phrases (like "Here is the brand story:"), concluding remarks, or any text other than the story narrative itself. Ensure the output is pure, verbose narrative prose.
-
-            **Brand Story:**
-
+        **Structured Brand Story (Markdown):**
         """
-        # --- END OF NEW PROMPT ---
+        # --- *** END OF MODIFIED PROMPT *** ---
 
         response = model.generate_content(prompt)
 
+        # Safer access to response text
         try:
             story = response.text
             logging.info("Gemini story generation successful.")
-            # Simple check to remove potential unwanted preamble, although the prompt asks not to add it
-            lines = story.strip().split('\n')
-            if lines and lines[0].lower().startswith("here is the brand story"):
-                story = "\n".join(lines[1:]).strip()
+            # Basic cleaning (remove potential leading/trailing markdown indicators if any)
+            story = story.strip().strip('`')
             return story
-        except ValueError as ve:
-            logging.warning(f"Could not access response text, likely blocked. Error: {ve}")
-            if response.prompt_feedback:
-                 logging.warning(f"Prompt Feedback Block Reason: {response.prompt_feedback.block_reason}")
-                 logging.warning(f"Prompt Feedback Safety Ratings: {response.prompt_feedback.safety_ratings}")
-            return None
-        except Exception as text_e:
-            logging.error(f"Error accessing response text: {text_e}")
+        except (ValueError, AttributeError, IndexError) as ve:
+            logging.warning(f"Could not access response text, likely blocked or unexpected format. Error: {ve}")
+            try: # Log feedback if available
+                if response.prompt_feedback:
+                    logging.warning(f"Prompt Feedback Block Reason: {response.prompt_feedback.block_reason}")
+                    logging.warning(f"Prompt Feedback Safety Ratings: {response.prompt_feedback.safety_ratings}")
+            except Exception as feedback_e:
+                 logging.warning(f"Could not retrieve prompt feedback details: {feedback_e}")
             return None
 
     except Exception as e:
-        logging.error(f"An error occurred during Gemini story generation: {e}")
+        logging.error(f"An error occurred during Gemini API call: {e}")
         return None
 
-# --- MODIFIED: Main Orchestrator Function ---
-# Renamed function
+# --- Main Orchestrator Function (Unchanged from previous refactor) ---
 def generate_brand_story(analysis_results: dict) -> str:
     """
     Generates a brand story, trying the Gemini LLM first and falling back to a template story.
+    Returns the story string.
     """
-    print("\n--- Generating Brand Story (Attempting Gemini) ---") # Updated print
-
-    # Calls the Gemini *story* generator
+    print("\n--- Generating Brand Story (Attempting Gemini) ---")
     gemini_story = _generate_story_gemini(analysis_results)
-
     if gemini_story:
         return gemini_story
     else:
-        # If Gemini fails, use the fallback *story* template
         logging.warning("Gemini story generation failed or skipped, using template fallback.")
-        return _generate_story_template(analysis_results) # Calls the story template
+        return _generate_story_template(analysis_results)
 
-# --- MODIFIED: Script Execution Block ---
+# --- Script Execution Block (Unchanged - for testing generator.py directly) ---
 if __name__ == "__main__":
-    # --- Setup Argument Parser ---
-    # Fixed the description string
+    # ... (keep existing test block) ...
     parser = argparse.ArgumentParser(description="Generate a brand story from NLP analysis results stored in a JSON file.")
-    parser.add_argument(
-        "input_file", # Name of the argument (positional)
-        type=str,     # Expected type is string (file path)
-        help="Path to the JSON file containing the NLP analysis results." # Help message
-    )
-    args = parser.parse_args() # Parse the command-line arguments
-
-    # --- Load data from the specified JSON file ---
-    analysis_data = None # Initialize variable
+    parser.add_argument("input_file", type=str, help="Path to the JSON file containing the NLP analysis results.")
+    args = parser.parse_args()
+    analysis_data = None
     try:
-        with open(args.input_file, 'r', encoding='utf-8') as f:
-            analysis_data = json.load(f)
+        with open(args.input_file, 'r', encoding='utf-8') as f: analysis_data = json.load(f)
         logging.info(f"Successfully loaded analysis data from: {args.input_file}")
-    except FileNotFoundError:
-        logging.error(f"Error: Input file not found at '{args.input_file}'")
-        print(f"Error: Input file not found at '{args.input_file}'", file=sys.stderr)
-        sys.exit(1)
-    except json.JSONDecodeError:
-        logging.error(f"Error: Could not decode JSON from '{args.input_file}'.")
-        print(f"Error: Could not decode JSON from '{args.input_file}'.", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        logging.error(f"An unexpected error occurred while reading '{args.input_file}': {e}")
-        print(f"An unexpected error occurred while reading '{args.input_file}': {e}", file=sys.stderr)
-        sys.exit(1)
+    except FileNotFoundError: logging.error(f"Error: Input file not found at '{args.input_file}'"); sys.exit(1)
+    except json.JSONDecodeError: logging.error(f"Error: Could not decode JSON from '{args.input_file}'."); sys.exit(1)
+    except Exception as e: logging.error(f"An unexpected error occurred while reading '{args.input_file}': {e}"); sys.exit(1)
 
-    # --- Proceed only if data was loaded successfully ---
     if analysis_data:
-        # Pass the loaded data to the STORY generator
-        final_story = generate_brand_story(analysis_data) # Renamed variable
-
-        print("\n--- Final Brand Story ---") # Updated print
-        print(final_story) # Renamed variable
+        final_story = generate_brand_story(analysis_data)
+        print("\n--- Final Brand Story (from direct script run) ---")
+        print(final_story)
     else:
-        logging.error("Analysis data could not be loaded. Exiting.")
-        print("Error: Analysis data could not be loaded.", file=sys.stderr)
-        sys.exit(1)
+        logging.error("Analysis data could not be loaded. Exiting."); sys.exit(1)
+
