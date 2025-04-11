@@ -34,8 +34,11 @@ joblib==1.4.2
 jsonschema==4.23.0
 jsonschema-specifications==2024.10.1
 kiwisolver==1.4.8
+markdown-it-py==3.0.0
+markdown-pdf==1.6
 MarkupSafe==3.0.2
 matplotlib==3.10.1
+mdurl==0.1.2
 narwhals==1.34.1
 nltk==3.9.1
 numpy==2.2.4
@@ -52,6 +55,7 @@ pyasn1_modules==0.4.2
 pydantic==2.11.3
 pydantic_core==2.33.1
 pydeck==0.9.1
+PyMuPDF==1.25.3
 pyparsing==3.2.3
 PySocks==1.7.1
 python-dateutil==2.9.0.post0
