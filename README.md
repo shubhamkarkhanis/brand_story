@@ -10,3 +10,6 @@
 # If you install any dependencies, make sure to
 
 ### pip freeze > requirements.txt
+
+# Project Deployed here
+### https://brandstory.streamlit.app/
