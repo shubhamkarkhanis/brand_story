@@ -1,4 +1,4 @@
-# Essence Engine 🚀
+# 🚀Essence Engine
 
 **AI-Powered Brand Story Generator**
 
