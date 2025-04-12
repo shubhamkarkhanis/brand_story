@@ -111,14 +111,4 @@ streamlit run app.py
 * Parth Kolekar
 
 *(Hackathon Project)*
-
----
-
-## 🙏 Acknowledgements
-
-* Streamlit for the awesome app framework.
-* Google for the Generative AI API.
-* The developers of the various open-source libraries used.
-* Flaticon and respective creators for icon assets (if applicable).
-
 ---
