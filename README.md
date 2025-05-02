@@ -73,7 +73,6 @@ You should see `(venv)` at the beginning of your terminal prompt.
 ```bash
 pip install -r requirements.txt
 ```
-*(If you encounter issues with `markdown-pdf` or `PyMuPDF`, consult their documentation for potential system-level dependencies.)*
 
 ### 5. Set Up API Key
 The application uses the Google Gemini API for story generation.
@@ -83,10 +82,6 @@ The application uses the Google Gemini API for story generation.
 # .env file
 GOOGLE_API_KEY=YOUR_API_KEY_HERE
 ```
-
-### 6. (Optional) Add Local Assets
-- If you want local background/social icons, ensure the `assets/` folder exists in the root and contains the necessary images (e.g., `bg.jpg`, `linkedin.png`, `twitter.png`, etc.).
-
 ---
 
 ## ▶️ Running Locally
@@ -109,6 +104,4 @@ streamlit run app.py
 * Shravani Joshi
 * Gaurav Mohagaonkar
 * Parth Kolekar
-
-*(Hackathon Project)*
 ---
