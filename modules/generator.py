@@ -66,7 +66,7 @@ def _generate_story_template(analysis_results: dict) -> str:
 def _generate_story_gemini(
     analysis_results: dict,
     desired_tone: str | None = None,
-    model_name: str = "models/gemini-2.0-flash"
+    model_name: str = "gemini-3-flash-preview"
 ) -> str | None:
     """
     Attempts to generate a structured brand story using the Google Gemini API,
